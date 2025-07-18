@@ -8,9 +8,12 @@ Remarkably, the woven turbulence achieves an extremely low computational cost, p
 This approach can simultaneously reproduce Gaussian velocity distributions, Kolmogorov's five-thirds scaling for the energy spectrum, as well as intertwined coherent vortices and intermittency akin to real turbulence.
 This approach not only bridges the gap between structural and statistical turbulence modelling, but also offers an efficient tool for applications requiring realistic turbulent fields.
 
+The code is written in FORTRAN and supports MPI parallel computing. 
+If you are interested in using the code for your own research, please contact zishuo_han@stu.pku.edu.cn and yyg@pku.edu.cn for more details.
+
 # Environment
 
-The Knotcode can be run on the `Tianhe-xy` supercomputer. The environment is set by the following commands: 
+The fortran code can be run on the `Tianhe-xy` supercomputer. The environment is set by the following commands: 
 
 ```
 module load intel/oneapi2024.2_impi
