@@ -1,0 +1,2 @@
+module load intel/oneapi2024.2_impi
+export I_MPI_PMI_LIBRARY='/usr/lib/libpmi.so'
