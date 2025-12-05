@@ -9,7 +9,7 @@ Nv = 3;
 
 %===========================
 c_e_s = 1.7;
-rho_w_obj = 0.019; 
+rho_w_obj = 0.024; 
 r_L = 4; 
 sigma_ratio = 4.0;
 c_B = 40;  
@@ -20,6 +20,9 @@ r_E = 5/3;
 Gamma_1 = 1.0;
 %---
 n_T_1 = 1;r_n_T = round(1/r_s);
+%---
+n_b1 = Nv-1;G_b1 = 1.0;
+n_b = Nv-0;G_b = 1.0;
 %===========================
 
 r_line = floor(r_L/r_s+0.5);%r_line = floor(r_L+0.5);
@@ -192,6 +195,13 @@ for i = 1:Nv
     n_T(i) = n_T_1*r_n_T^(i-1);
 end
 
+%bottleneck
+for i = n_b1:n_b
+    Gamma(i) = G_b1*Gamma(i);
+end
+for i = n_b:Nv
+    Gamma(i) = G_b*Gamma(i);
+end
 
 ii_line = 0;
 for i = 1:Nv
