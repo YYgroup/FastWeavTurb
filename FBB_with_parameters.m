@@ -10,7 +10,7 @@ Nv = 3;
 %===========================
 c_e_s = 1.7;
 rho_w_obj = 0.024; 
-r_L = 4; 
+r_nL = 4; 
 sigma_ratio = 4.0;
 c_B = 40;  
 %---
@@ -20,14 +20,11 @@ r_E = 5/3;
 Gamma_1 = 1.0;
 %---
 n_T_1 = 1;r_n_T = round(1/r_s);
-%---
-n_b1 = Nv-1;G_b1 = 1.0;
-n_b = Nv-0;G_b = 1.0;
 %===========================
 
-r_line = floor(r_L/r_s+0.5);%r_line = floor(r_L+0.5);
-r_Np = floor(r_L/r_s/r_line);
-r_rho = r_s*r_s*r_L;
+r_line = floor(r_nL/r_s+0.5);
+r_Np = floor(r_nL/r_s/r_line);
+r_rho = r_s*r_s*r_nL;
 if(r_rho~=1) 
     rho_Nv = rho_w_obj/(1-r_rho^Nv)*(1-r_rho)*r_rho^(Nv-1);
 else
@@ -38,10 +35,10 @@ sigma_1 = sigma_Nv/(r_s^(Nv-1));
 dB_Nv = c_B*sigma_Nv; 
 dB_1 = dB_Nv/r_s^(Nv-1);
 L_Nv_temp = rho_Nv*(2*pi)^3/sigma_Nv^2;
-L_1_temp = L_Nv_temp/r_L^(Nv-1);
+L_1_temp = L_Nv_temp/r_nL^(Nv-1);
 Np_1 = round(L_1_temp/(1.2*dB_1));
 rho_w_Nv = Np_1*(r_Np*r_line)^(Nv-1)*(1.2*dB_Nv)*sigma_Nv^2/(2*pi)^3;
-r_Gamma = r_s^((r_E-1)/2)*r_L^(-1/2);
+r_Gamma = r_s^((r_E-1)/2)*r_nL^(-1/2);
 
 count_line = 0;
 m_line = zeros(1,Nv);
@@ -195,13 +192,6 @@ for i = 1:Nv
     n_T(i) = n_T_1*r_n_T^(i-1);
 end
 
-%bottleneck
-for i = n_b1:n_b
-    Gamma(i) = G_b1*Gamma(i);
-end
-for i = n_b:Nv
-    Gamma(i) = G_b*Gamma(i);
-end
 
 ii_line = 0;
 for i = 1:Nv
