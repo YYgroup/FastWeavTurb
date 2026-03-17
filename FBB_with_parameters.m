@@ -12,6 +12,7 @@ c_e_s = 1.7;
 rho_w_obj = 0.024; 
 r_nL = 4; 
 sigma_ratio = 4.0;
+sheet_ratio = 1.0;
 c_B = 40;  
 %---
 r_s = 1/2;
@@ -212,6 +213,8 @@ fprintf(fid,'line_e\n');
 fprintf(fid,'%8d\n',ii_line);
 fprintf(fid,'sigma_ratio\n');
 fprintf(fid,'%18.5f\n',sigma_ratio);
+fprintf(fid,'sheet_ratio\n');
+fprintf(fid,'%18.5f\n',sheet_ratio);
 fprintf(fid,'eta_t\n');
 fprintf(fid,'%18.5f\n',0.0);
 fprintf(fid,'---------------\n');

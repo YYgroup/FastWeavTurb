@@ -26,6 +26,9 @@
 ! Zishuo Han, 2024 April, ver-5.6 employ dynamic dtf
 ! Zishuo Han, 2024 Oct, ver-5.7 adopt adjustable multi-scale vortices
 ! Zishuo Han, 2025 Apr, ver-5.8 modify input and output
+! Zishuo Han, 2025 Dec, ver-5.9 distinguish discrete T and continuous T, see 'ts_ci_list2' and 'tci_list2'
+! Zishuo Han, 2025 Dec, ver-5.10 set nx_plus = nx/2; modify Bzeta for straight line
+! Zishuo Han, 2026 Jan, ver-5.11 add givenfunction curve mode and sheet mode
 
 program Weav_ver5_8_2
    implicit none
@@ -35,7 +38,7 @@ program Weav_ver5_8_2
    !==parameters==
    integer nx, ny, nz
    real*8 sigma_min
-   real*8 sigma_max, sigma_ratio
+   real*8 sigma_max, sigma_ratio, sheet_ratio
    real*8 Gamma
    real*8 Gamma_line_ratio, sigma_line_ratio
    real*8, allocatable :: Gamma_line(:), sigma_line(:)
@@ -51,11 +54,11 @@ program Weav_ver5_8_2
    !==switch==
    !=0:close,=1:open
    !integer, parameter :: if_filter = 1
-   integer, parameter :: if_spline_out = 0
-   integer, parameter :: vorticity_output = 1, u_out = 0, d_out = 0, multi_out = 0
+   integer, parameter :: if_spline_out = 1
+   integer, parameter :: vorticity_output = 1, u_out = 1, d_out = 0, multi_out = 0
    integer, parameter :: field2d_output = 0
-   integer, parameter :: if_pdf = 1
-   integer, parameter :: if_Sp = 1, Sp_order = 10
+   integer, parameter :: if_pdf = 0
+   integer, parameter :: if_Sp = 0, Sp_order = 10
    !==switch==
 
    !==centerline==
@@ -79,14 +82,16 @@ program Weav_ver5_8_2
    real*8, allocatable, dimension(:)  :: dtf_list
    integer, allocatable, dimension(:)  :: ntf_list
    real*8, allocatable, dimension(:)  :: kappa_list
-   real*8, allocatable, dimension(:, :, :)  :: ci_list2, dci_list2, tci_list2
+   real*8, allocatable, dimension(:, :, :)  :: ci_list2, dci_list2, tci_list2, ts_ci_list2, N_ci_list2, B_ci_list2
    real*8, allocatable, dimension(:, :)  :: ndci_list2, s_list2
    real*8, allocatable, dimension(:, :, :)  :: ci_list_pre, dci_list_pre
    real*8, allocatable, dimension(:)  :: dtf_list_pre
    real*8, allocatable, dimension(:, :)  :: s_list_pre, ndci_list_pre !think later: theory cum?
-   real*8, dimension(3) :: ci0, ci1, ci2, dci0, dci1, tci0, tci1
+   real*8, dimension(3) :: ci0, ci1, ci2, dci0, dci1, tci0, tci1, ts_ci0, ts_ci1
    real*8 s0, s1, s2, ndci0, ndci1
-   real*8, dimension(3) :: xczeta, Tzeta, Nzeta, Bzeta, e_th, e_rho
+   real*8, dimension(3) :: xczeta, Tzeta, Nzeta, Bzeta, Bzeta_continue, e_th, e_rho
+   real*8 len_Bzeta, len_Nzeta
+   integer if_Bzeta_continue
    real*8, dimension(3) :: czeta, dczeta, ddczeta, dddczeta, dcddczeta
    real*8 zeta, ndczeta, ndcddczeta, kappazeta, tauzeta, nxczeta
    real*8 kappa_sup, theta
@@ -116,7 +121,10 @@ program Weav_ver5_8_2
    !real*8, allocatable :: vorx_d1(:, :, :), vory_d1(:, :, :), vorz_d1(:, :, :)
    real*4, allocatable :: tmp_real4(:, :, :)
    real*8, allocatable :: velx(:, :, :), vely(:, :, :), velz(:, :, :)
-   real*8, allocatable :: disp_field(:, :, :)
+   real*8, allocatable :: disp_field(:, :, :), Q_field(:, :, :), R_field(:, :, :)
+   real*8, allocatable :: eigenvalues(:, :, :, :)         ! Eigenvalues of strain tensor
+   real*8, allocatable :: eigenvectors(:, :, :, :, :)     ! Orthonormal eigenvectors (columns)
+   real*8, allocatable :: ew(:, :, :, :), beta(:, :, :)
    complex(8), allocatable :: spec_ux(:, :, :), spec_uy(:, :, :), spec_uz(:, :, :)
    complex(8), allocatable :: spec_wx(:, :, :), spec_wy(:, :, :), spec_wz(:, :, :)
    complex(8), allocatable :: spec(:, :, :)
@@ -125,7 +133,8 @@ program Weav_ver5_8_2
    !==statistics==
    real*8 deviation, helicity, Etot, Diss, Enstrophy, up
    integer norder
-   real*8, allocatable :: Sn(:), r(:)
+   real*8, allocatable :: Sn(:, :), rr(:)
+   integer lg2L
    integer, parameter :: bin_num = 1000
    !==statistics==
 
@@ -141,7 +150,7 @@ program Weav_ver5_8_2
    integer r_d
    integer n_d
 
-   real*8 tp, t0, t1, t2, t3, t4, t5, t6, t7, t8
+   real*8 tp, ts0, ts1, t0, t1, t2, t3, t4, t5, t6, t7, t8
 
    character*200 name
    real, allocatable :: data_box(:, :, :, :)
@@ -203,6 +212,9 @@ program Weav_ver5_8_2
    read (512, *) sigma_ratio
    !sigma_max = sigma_ratio*sigma_min
    read (512, *)
+   read (512, *) sheet_ratio
+   !sigma_sheet_long = sheet_ratio*sigma
+   read (512, *)
    read (512, *) eta0
    !----------
    read (512, *)
@@ -212,7 +224,7 @@ program Weav_ver5_8_2
    read (512, *) ntf_pre
    read (512, *)
    read (512, *) Rtube_ratio
-   !Rtube = Rtube_ratio*sigma_max
+   !Rtube = Rtube_ratio*sheet_ratio*sigma_max
    read (512, *)
    read (512, *) dzeta_sup
    !----------
@@ -236,6 +248,8 @@ program Weav_ver5_8_2
       write (19, *) line_e
       write (19, *) 'sigma_ratio'
       write (19, *) sigma_ratio
+      write (19, *) 'sheet_ratio'
+      write (19, *) sheet_ratio
       write (19, *) 'eta_t'
       write (19, *) eta0
       write (19, *) '---------------'
@@ -282,16 +296,20 @@ program Weav_ver5_8_2
    end if
 
    !consider dtf_length_max, see mark1
-   nx_plus = ceiling((Rtube + dtf_length_max)/dx)
-   ny_plus = ceiling((Rtube + dtf_length_max)/dy)
-   nz_plus = ceiling((Rtube + dtf_length_max)/dz)
+   ! nx_plus = ceiling((Rtube + dtf_length_max)/dx) !bug consider line beyond boundary
+   ! ny_plus = ceiling((Rtube + dtf_length_max)/dy)
+   ! nz_plus = ceiling((Rtube + dtf_length_max)/dz)
+   nx_plus = nx/2
+   ny_plus = nx/2
+   nz_plus = nx/2
 
    allocate (k2(nx, ny, nzp))
    allocate (kx(nx))
    allocate (ky(ny))
    allocate (kz(nzp))
-   allocate (Sn(nx/2 + 1))
-   allocate (r(nx/2 + 1))
+   lg2L = floor(log(real(nx))/log(2.0) + 0.01)
+   allocate (Sn(Sp_order, 0:2*lg2L))
+   allocate (rr(0:2*lg2L))
    allocate (meshx_plus(1 - nx_plus:nx + nx_plus))
    allocate (meshy_plus(1 - ny_plus:ny + ny_plus))
    allocate (meshz_plus(1 - nz_plus:nz + nz_plus)) ! nz, not nzp
@@ -619,6 +637,8 @@ program Weav_ver5_8_2
       allocate (dci_list_pre(n_sec, ntf_pre + 1, 3))
       allocate (ndci_list_pre(n_sec, ntf_pre + 1))
 
+      
+
       if (id == 0) then
          open (519, file='./output/test_data.dat', status='unknown')
       end if
@@ -630,31 +650,19 @@ program Weav_ver5_8_2
             s_list_pre(t_i, t_j) = cze_pl(t_i) + dtf_list_pre(t_i)*(t_j - 1) !not arc length
             dzeta = min(dzeta_sup, 1.0d0*dtf_list_pre(t_i))
             call d1_coo_curve_spline_5th((s_list_pre(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), dczeta, coe_3)
-            !call d1_coo_curve_ip((s_list_pre(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), dczeta, dzeta*Len_Disc(i_line), coe_3)
+            !call d1_coo_curve_givenfunction(s_list_pre(t_i, t_j), dczeta, dzeta)
             call norm_zeta(dczeta, ndczeta)
             call d2_coo_curve_spline_5th((s_list_pre(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), ddczeta, coe_3)
-            !call d2_coo_curve_ip((s_list_pre(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), ddczeta, dzeta*Len_Disc(i_line), coe_3)
+            !call d2_coo_curve_givenfunction(s_list_pre(t_i, t_j), ddczeta, dzeta)
             call cross_zeta(dczeta, ddczeta, dcddczeta)
             call norm_zeta(dcddczeta, ndcddczeta)
             theta = theta + ndcddczeta/(ndczeta**2.d0)*dtf_list_pre(t_i)*Len_Disc(i_line)
          end do
          ntf_list(t_i) = ceiling(ntf_times*theta/pi2) + 1
          dtf_list(t_i) = (cze_pl(t_i + 1) - cze_pl(t_i))/(1.0d0*ntf_list(t_i))
-         ! if (dtf_list(t_i)*Len_Disc(i_line) < dx/10.0d0) then !temp !think later
-         !    dtf_list(t_i) = dx/10.0d0/Len_Disc(i_line)
-         !    ntf_list(t_i) = ceiling((cze_pl(t_i + 1) - cze_pl(t_i))/dtf_list(t_i))
-         !    dtf_list(t_i) = (cze_pl(t_i + 1) - cze_pl(t_i))/(1.0d0*ntf_list(t_i))
-         ! end if
-
-         !ntf_list(t_i) = 10 !temp
-         !dtf_list(t_i) = (cze_pl(t_i + 1) - cze_pl(t_i))/(1.0d0*ntf_list(t_i))
-         ! if (id == 0) then
-         !    write (519, *) '----------[t_i=', t_i, ']----------'
-         !    write (519, *) 'theta=', theta
-         !    write (519, *) 'ntf=', ntf_list(t_i)
-         !    write (519, *) 'dtf*Len=', dtf_list(t_i)*Len_Disc(i_line)
-         ! end if
       end do
+      
+      
 
       if (id == 0) then
          if (if_spline_out == 1) then
@@ -663,7 +671,7 @@ program Weav_ver5_8_2
             id3 = i_line/100 - (i_line/1000)*10
             id4 = i_line/10 - (i_line/100)*10
             id5 = i_line - (i_line/10)*10
-            open (312, file='./output/centerline_spline/centerline_spline'//char(id1 + 48)//char(id2 + 48)//char(id3 + 48)//char(id4 + 48)//char(id5 + 48)//'.dat', status='unknown')
+            open (312, file='./output/centerline_spline/centerline_spline_'//char(id1 + 48)//char(id2 + 48)//char(id3 + 48)//char(id4 + 48)//char(id5 + 48)//'.dat', status='unknown')
             write (312, *) 1
             write (312, *) sum(ntf_list(1:n_sec))
          end if
@@ -696,6 +704,9 @@ program Weav_ver5_8_2
       allocate (s_list2(n_sec + 1, ntf_max + 1))
       allocate (dci_list2(n_sec, ntf_max + 1, 3))
       allocate (tci_list2(n_sec, ntf_max + 1, 3))
+      allocate (ts_ci_list2(n_sec, ntf_max + 1, 3))
+      allocate (N_ci_list2(n_sec, ntf_max + 1, 3))
+      allocate (B_ci_list2(n_sec, ntf_max + 1, 3))
       allocate (ndci_list2(n_sec, ntf_max + 1))
 
       ! do t_i = 1, n_sec + 1
@@ -709,6 +720,7 @@ program Weav_ver5_8_2
             s_list2(t_i, t_j) = cze_pl(t_i) + dtf_list(t_i)*(t_j - 1) !mind !not arc length, 1 to 1 mapping
             !mind
             call coo_curve_spline_5th((s_list2(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), ci_list2(t_i, t_j, :), coe_3)
+            !call coo_curve_givenfunction(s_list2(t_i, t_j), ci_list2(t_i, t_j, :))
          end do
       end do
       !think later
@@ -750,6 +762,88 @@ program Weav_ver5_8_2
          tci_list2(t_i, t_j, :) = dci_list2(t_i, t_j, :)/ndci_list2(t_i, t_j) ! = tci_list2(t_i+1, 1, :)
       end do
 
+      do t_i = 1, n_sec
+         coe_3(:, :) = coe_list(t_i, :, :)
+         do t_j = 1, ntf_list(t_i) + 1
+            call d1_coo_curve_spline_5th((s_list2(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), dczeta, coe_3)
+            !call d1_coo_curve_givenfunction(s_list2(t_i, t_j), dczeta, dzeta)
+            call norm_zeta(dczeta, ndczeta)
+            ts_ci_list2(t_i, t_j, :) = dczeta/ndczeta
+            !==test==
+            Tzeta = ts_ci_list2(t_i, t_j, :)
+            call d2_coo_curve_spline_5th((s_list2(t_i, t_j) - cze_pl(t_i))*Len_Disc(i_line), ddczeta, coe_3)
+            !call d2_coo_curve_givenfunction(s_list2(t_i, t_j), ddczeta, dzeta)
+            call cross_zeta(dczeta, ddczeta, dcddczeta)
+            call norm_zeta(dcddczeta, ndcddczeta)
+
+            if (ndcddczeta > 1.0d-8) then
+               Bzeta = dcddczeta/ndcddczeta
+               Bzeta_continue = Bzeta
+               if_Bzeta_continue = 1
+            elseif (if_Bzeta_continue == 1) then
+               Bzeta = Bzeta_continue
+            else
+               Nzeta = [1.0d0, 0.0d0, 0.0d0]
+               call cross_zeta(Nzeta, Tzeta, Bzeta)
+               call norm_zeta(Bzeta, len_Bzeta)
+               if (len_Bzeta < 1.0d-8) then
+                  Nzeta = [0.0d0, 1.0d0, 0.0d0]
+                  call cross_zeta(Nzeta, Tzeta, Bzeta)
+                  call norm_zeta(Bzeta, len_Bzeta)
+               end if
+               Bzeta = Bzeta/len_Bzeta
+            end if
+            call cross_zeta(Bzeta, Tzeta, Nzeta)
+            N_ci_list2(t_i, t_j, :) = Nzeta
+            B_ci_list2(t_i, t_j, :) = Bzeta
+            !==test==
+         end do
+      end do
+      ! head tail deal
+      do t_i = 1, n_sec - 1
+         ts_ci_list2(t_i, ntf_list(t_i) + 1, :) = ts_ci_list2(t_i + 1, 1, :)
+      end do
+      ts_ci_list2(n_sec, ntf_list(n_sec) + 1, :) = ts_ci_list2(1, 1, :)
+
+      if (id == 0) then
+         if (if_spline_out == 1) then
+            id1 = i_line/10000
+            id2 = i_line/1000 - (i_line/10000)*10
+            id3 = i_line/100 - (i_line/1000)*10
+            id4 = i_line/10 - (i_line/100)*10
+            id5 = i_line - (i_line/10)*10
+            open (313, file='./output/centerline_spline/centerline_spline_T_'//char(id1 + 48)//char(id2 + 48)//char(id3 + 48)//char(id4 + 48)//char(id5 + 48)//'.dat', status='unknown')
+            write (313, *) 1
+            write (313, *) sum(ntf_list(1:n_sec))
+            do t_i = 1, n_sec
+               do t_j = 1, ntf_list(t_i)
+                  write (313, *) ts_ci_list2(t_i, t_j, 1), ts_ci_list2(t_i, t_j, 2), ts_ci_list2(t_i, t_j, 3)
+               end do
+            end do
+            close (313)
+
+            open (314, file='./output/centerline_spline/centerline_spline_N_'//char(id1 + 48)//char(id2 + 48)//char(id3 + 48)//char(id4 + 48)//char(id5 + 48)//'.dat', status='unknown')
+            write (314, *) 1
+            write (314, *) sum(ntf_list(1:n_sec))
+            do t_i = 1, n_sec
+               do t_j = 1, ntf_list(t_i)
+                  write (314, *) N_ci_list2(t_i, t_j, 1), N_ci_list2(t_i, t_j, 2), N_ci_list2(t_i, t_j, 3)
+               end do
+            end do
+            close (314)
+
+            open (315, file='./output/centerline_spline/centerline_spline_B_'//char(id1 + 48)//char(id2 + 48)//char(id3 + 48)//char(id4 + 48)//char(id5 + 48)//'.dat', status='unknown')
+            write (315, *) 1
+            write (315, *) sum(ntf_list(1:n_sec))
+            do t_i = 1, n_sec
+               do t_j = 1, ntf_list(t_i)
+                  write (315, *) B_ci_list2(t_i, t_j, 1), B_ci_list2(t_i, t_j, 2), B_ci_list2(t_i, t_j, 3)
+               end do
+            end do
+            close (315)
+         end if
+      end if
+
       endtime = MPI_WTIME()
       if (id == 0) then
          print *, 'Spline interpolation time =', endtime - starttime
@@ -758,10 +852,13 @@ program Weav_ver5_8_2
       end if
 
       !think again
+      if_Bzeta_continue = 0
       starttime = MPI_WTIME()
       do t_i = 1, n_sec
 
          coe_3(:, :) = coe_list(t_i, :, :)
+
+         !Rtube = Rtube_ratio*sigma_max
 
          do t_j = 1, ntf_list(t_i)
             s0 = s_list2(t_i, t_j)
@@ -774,6 +871,8 @@ program Weav_ver5_8_2
             ndci1 = ndci_list2(t_i, t_j + 1)
             tci0 = tci_list2(t_i, t_j, :)
             tci1 = tci_list2(t_i, t_j + 1, :)
+            ts_ci0 = ts_ci_list2(t_i, t_j, :)
+            ts_ci1 = ts_ci_list2(t_i, t_j + 1, :)
 
             !mark1
             do ijk_co = 1, 3
@@ -787,9 +886,9 @@ program Weav_ver5_8_2
             !mark1
 
             call sigma_func(s0, length(i_line), sigma, sigma_max, sigma_min, n_T)
-            Rtube = Rtube_ratio*sigma
+            Rtube = Rtube_ratio*sigma*sheet_ratio
             call sigma_func(s1, length(i_line), sigma, sigma_max, sigma_min, n_T)
-            Rtube = max(Rtube, Rtube_ratio*sigma)
+            Rtube = max(Rtube, Rtube_ratio*sigma*sheet_ratio)
             i_min = floor((min(ci0(1), ci1(1)) - xstart - Rtube)/dx + 1)  ! mind the meshx_plus(i, :, :) = (i - 1.d0)*dx + xstart
             i_max = ceiling((max(ci0(1), ci1(1)) - xstart + Rtube)/dx + 1)
             j_min = floor((min(ci0(2), ci1(2)) - ystart - Rtube)/dy + 1)
@@ -803,18 +902,27 @@ program Weav_ver5_8_2
                      k = (mod(k_plus + nz - 1, nz) + 1) - nzp*id !mind nzp
                      if (k > 0 .and. k <= nzp) then
                         !see !mark v5_3_2 !mind there may be wrong when ci is on the mesh
-                        t0 = (meshx_plus(i_plus) - ci0(1))*tci0(1) + &
-                        &(meshy_plus(j_plus) - ci0(2))*tci0(2) + (meshz_plus(k_plus) - ci0(3))*tci0(3)
-                        if (t0 >= 0.d0) then
+                        ! t0 = (meshx_plus(i_plus) - ci0(1))*tci0(1) + &
+                        ! &(meshy_plus(j_plus) - ci0(2))*tci0(2) + (meshz_plus(k_plus) - ci0(3))*tci0(3)
+                        ts0 = (meshx_plus(i_plus) - ci0(1))*ts_ci0(1) + &
+                        &(meshy_plus(j_plus) - ci0(2))*ts_ci0(2) + (meshz_plus(k_plus) - ci0(3))*ts_ci0(3)
+                        if (ts0 >= 0.d0) then
 
-                           t1 = (meshx_plus(i_plus) - ci1(1))*tci1(1) + &
-                              &(meshy_plus(j_plus) - ci1(2))*tci1(2) + &
-                              &(meshz_plus(k_plus) - ci1(3))*tci1(3)
-                           if (t1 < 0.d0) then
+                           ! t1 = (meshx_plus(i_plus) - ci1(1))*tci1(1) + &
+                           !    &(meshy_plus(j_plus) - ci1(2))*tci1(2) + &
+                           !    &(meshz_plus(k_plus) - ci1(3))*tci1(3)
+                           ts1 = (meshx_plus(i_plus) - ci1(1))*ts_ci1(1) + &
+                              &(meshy_plus(j_plus) - ci1(2))*ts_ci1(2) + &
+                              &(meshz_plus(k_plus) - ci1(3))*ts_ci1(3)
+                           if (ts1 < 0.d0) then
+
+                              t0 = (meshx_plus(i_plus) - ci0(1))*tci0(1) + &
+                              &(meshy_plus(j_plus) - ci0(2))*tci0(2) + (meshz_plus(k_plus) - ci0(3))*tci0(3)
 
                               rho = dsqrt((meshx_plus(i_plus) - ci0(1))**2 + &
                               &(meshy_plus(j_plus) - ci0(2))**2 + &
                               &(meshz_plus(k_plus) - ci0(3))**2 - t0**2)
+
                               if (rho < Rtube) then
                                  t1 = (meshx_plus(i_plus) - ci1(1))*tci0(1) + &
                                  &(meshy_plus(j_plus) - ci1(2))*tci0(2) + &
@@ -823,17 +931,39 @@ program Weav_ver5_8_2
                                  zeta_sec = zeta - s_list2(t_i, 1) !mind
 
                                  call coo_curve_spline_5th(zeta_sec*Len_Disc(i_line), czeta, coe_3)
+                                 !call coo_curve_givenfunction(zeta, czeta)
                                  dzeta = min(dzeta_sup, 1.0d0*dtf_list(t_i))
                                  !think later, dzeta can not be too small, otherwise the calculation is difficult
                                  !dzeta : 1.0d-4 ~ 1.0d-5 ?
                                  call d1_coo_curve_spline_5th(zeta_sec*Len_Disc(i_line), dczeta, coe_3)
-                                 !call d1_coo_curve_ip(zeta_sec*Len_Disc(i_line), dczeta, dzeta*Len_Disc(i_line), coe_3)
+                                 !call d1_coo_curve_givenfunction(zeta, dczeta, dzeta)
                                  call norm_zeta(dczeta, ndczeta)
                                  Tzeta = dczeta/ndczeta
                                  call d2_coo_curve_spline_5th(zeta_sec*Len_Disc(i_line), ddczeta, coe_3)
-                                 !call d2_coo_curve_ip(zeta_sec*Len_Disc(i_line), ddczeta, dzeta*Len_Disc(i_line), coe_3)
+                                 !call d2_coo_curve_givenfunction(zeta, ddczeta, dzeta)
                                  call cross_zeta(dczeta, ddczeta, dcddczeta)
                                  call norm_zeta(dcddczeta, ndcddczeta)
+
+                                 if (ndcddczeta > 1.0d-8) then
+                                    Bzeta = dcddczeta/ndcddczeta
+                                    Bzeta_continue = Bzeta
+                                    if_Bzeta_continue = 1
+                                 elseif (if_Bzeta_continue == 1) then
+                                    Bzeta = Bzeta_continue
+                                 else
+                                    Nzeta = [1.0d0, 0.0d0, 0.0d0]
+                                    call cross_zeta(Nzeta, Tzeta, Bzeta)
+                                    call norm_zeta(Bzeta, len_Bzeta)
+                                    if (len_Bzeta < 1.0d-8) then
+                                       Nzeta = [0.0d0, 1.0d0, 0.0d0]
+                                       call cross_zeta(Nzeta, Tzeta, Bzeta)
+                                       call norm_zeta(Bzeta, len_Bzeta)
+                                    end if
+                                    Bzeta = Bzeta/len_Bzeta
+                                 end if
+
+                                 call cross_zeta(Bzeta, Tzeta, Nzeta)
+                                 kappazeta = ndcddczeta/(ndczeta**3.d0)
 
                                  meshxyz(1) = meshx_plus(i_plus)
                                  meshxyz(2) = meshy_plus(j_plus)
@@ -841,56 +971,38 @@ program Weav_ver5_8_2
                                  call cminus(meshxyz, czeta, xczeta)
                                  call norm_zeta(xczeta, nxczeta)
                                  rho = nxczeta
+
+                                 call dot_zeta(xczeta, Nzeta, t4)
+                                 costh = t4/(nxczeta + 1.0d-15)
+                                 call dot_zeta(xczeta, Bzeta, t4)
+                                 sinth = t4/(nxczeta + 1.0d-15)
+
                                  call sigma_func(zeta, length(i_line), sigma, sigma_max, sigma_min, n_T)
-                                 tp = dexp(-((rho - pdx)**2.d0)/2.d0/(sigma**2.0d0))/(pi2*(sigma**2.0d0))
-                                 ft_delta = -dexp(-((Rtube)**2.d0)/2.d0/(sigma**2.0d0))/(pi2*(sigma**2.0d0))
-                                 tp = tp + ft_delta
+  tp = dexp(-(rho**2.d0)/2.d0*(costh**2.0d0/sigma**2.0d0 + sinth**2.0d0/(sigma*sheet_ratio)**2.0d0))/(pi2*(sigma*sigma*sheet_ratio))
+                                 !ft_delta = -dexp(-((Rtube)**2.d0)/2.d0/(sigma**2.0d0))/(pi2*(sigma**2.0d0))
                                  !think later in parallel
-                                 !call dsigmads_func_spline_5th(zeta, zeta_sec, Len_Disc(i_line), length(i_line), dsigmads, sigma_max, sigma_min, dzeta, coe_3)
 
                     call dsigmadzeta(zeta, zeta_sec, Len_Disc(i_line), length(i_line), dsigmads, sigma_max, sigma_min, dzeta, coe_3)
-                    !!!bug zeta is not arc length!!!
+                                 !!!bug zeta is not arc length!!!
                                  dsigmads = dsigmads/ndczeta/Len_Disc(i_line)
-                                 if (ndcddczeta < 1.0d-8) then  !mark v5_3_1
-                                    e_rho = xczeta/(nxczeta + 1.0d-15) ! = 0 is acceptable, which means rho = 0
-                                    call cross_zeta(e_rho, Tzeta, e_th)
 
-                                    i = mod(i_plus + nx - 1, nx) + 1
-                                    j = mod(j_plus + ny - 1, ny) + 1
-                                    ! k has already been calculated
-                                    !phiv(i, j, k) = phiv(i, j, k) + (dexp(-((rho - pdx)**2.d0)/2.d0/(sigma**2.0d0)))
-                                    !call etaFunc(zeta, length(i_line), phiv(i, j, k), eta) !temp
-                                    eta = eta0 !temp
-                               vorx(i, j, k) = vorx(i, j, k) + tp*Gamma*(Tzeta(1) + eta*rho*e_th(1) + (rho*dsigmads/sigma)*e_rho(1))
-                               vory(i, j, k) = vory(i, j, k) + tp*Gamma*(Tzeta(2) + eta*rho*e_th(2) + (rho*dsigmads/sigma)*e_rho(2))
-                               vorz(i, j, k) = vorz(i, j, k) + tp*Gamma*(Tzeta(3) + eta*rho*e_th(3) + (rho*dsigmads/sigma)*e_rho(3))
+                                 t5 = -sinth*rho/(1.d0 - kappazeta*rho*costh)
+                                 t6 = costh*rho/(1.d0 - kappazeta*rho*costh)
+                                 t7 = costh*rho*dsigmads/sigma/(1.d0 - kappazeta*rho*costh)
+                                 t8 = sinth*rho*dsigmads/sigma/(1.d0 - kappazeta*rho*costh)
 
-                                 else
-                                    Bzeta = dcddczeta/ndcddczeta
-                                    call cross_zeta(Bzeta, Tzeta, Nzeta)
-                                    kappazeta = ndcddczeta/(ndczeta**3.d0)
-                                    call dot_zeta(xczeta, Nzeta, t4)
-                                    costh = t4/(nxczeta + 1.0d-15)
-                                    call dot_zeta(xczeta, Bzeta, t4)
-                                    sinth = t4/(nxczeta + 1.0d-15)
-                                    t5 = -sinth*rho/(1.d0 - kappazeta*rho*costh)
-                                    t6 = costh*rho/(1.d0 - kappazeta*rho*costh)
-                                    t7 = costh*rho*dsigmads/sigma/(1.d0 - kappazeta*rho*costh)
-                                    t8 = sinth*rho*dsigmads/sigma/(1.d0 - kappazeta*rho*costh)
-
-                                    i = mod(i_plus + nx - 1, nx) + 1
-                                    j = mod(j_plus + ny - 1, ny) + 1
-                                    ! k has already been calculated
-                                    !phiv(i, j, k) = phiv(i, j, k) + (dexp(-((rho - pdx)**2.d0)/2.d0/(sigma**2.0d0)))
-                                    !call etaFunc(zeta, length(i_line), phiv(i, j, k), eta)
-                                    eta = eta0 !temp
-                                    vorx(i, j, k) = vorx(i, j, k) + tp*Gamma*(Tzeta(1) + &
-                                    &eta*(t5*Nzeta(1) + t6*Bzeta(1)) + (t7*Nzeta(1) + t8*Bzeta(1)))
-                                    vory(i, j, k) = vory(i, j, k) + tp*Gamma*(Tzeta(2) + &
-                                    &eta*(t5*Nzeta(2) + t6*Bzeta(2)) + (t7*Nzeta(2) + t8*Bzeta(2)))
-                                    vorz(i, j, k) = vorz(i, j, k) + tp*Gamma*(Tzeta(3) + &
-                                    &eta*(t5*Nzeta(3) + t6*Bzeta(3)) + (t7*Nzeta(3) + t8*Bzeta(3)))
-                                 end if
+                                 i = mod(i_plus + nx - 1, nx) + 1
+                                 j = mod(j_plus + ny - 1, ny) + 1
+                                 ! k has already been calculated
+                                 !phiv(i, j, k) = phiv(i, j, k) + (dexp(-((rho - pdx)**2.d0)/2.d0/(sigma**2.0d0)))
+                                 !call etaFunc(zeta, length(i_line), phiv(i, j, k), eta)
+                                 eta = eta0 !temp
+                                 vorx(i, j, k) = vorx(i, j, k) + tp*Gamma*(Tzeta(1) + &
+                                 &eta*(t5*Nzeta(1) + t6*Bzeta(1)) + (t7*Nzeta(1) + t8*Bzeta(1)))
+                                 vory(i, j, k) = vory(i, j, k) + tp*Gamma*(Tzeta(2) + &
+                                 &eta*(t5*Nzeta(2) + t6*Bzeta(2)) + (t7*Nzeta(2) + t8*Bzeta(2)))
+                                 vorz(i, j, k) = vorz(i, j, k) + tp*Gamma*(Tzeta(3) + &
+                                 &eta*(t5*Nzeta(3) + t6*Bzeta(3)) + (t7*Nzeta(3) + t8*Bzeta(3)))
 
                               end if
                            end if
@@ -922,6 +1034,9 @@ program Weav_ver5_8_2
       deallocate (ci_list2)
       deallocate (dci_list2)
       deallocate (tci_list2)
+      deallocate (ts_ci_list2)
+      deallocate (N_ci_list2)
+      deallocate (B_ci_list2)
 
       if (if_filter_line(i_line)) then
          starttime_part = MPI_WTIME()
@@ -979,6 +1094,7 @@ program Weav_ver5_8_2
 
    starttime = MPI_WTIME()
    !==vel==
+   starttime_part = MPI_WTIME()
    if (id == 0) then
       write (192, *) 'velocity calculation begin'
    end if
@@ -1012,14 +1128,24 @@ program Weav_ver5_8_2
    allocate (vely(nx, ny, nzp))
    allocate (velz(nx, ny, nzp))
    allocate (disp_field(nx, ny, nzp))
+   allocate (Q_field(nx, ny, nzp))
+   allocate (R_field(nx, ny, nzp))
+   allocate (eigenvalues(3, nx, ny, nzp))
+   allocate (eigenvectors(3, 3, nx, ny, nzp))
+   allocate (ew(3, nx, ny, nzp))
+   allocate (beta(nx, ny, nzp))
    call fourier_backward(velx, spec_ux, nx, ny, nz, planxb, planyb, planzb, id, nproc)
    call fourier_backward(vely, spec_uy, nx, ny, nz, planxb, planyb, planzb, id, nproc)
    call fourier_backward(velz, spec_uz, nx, ny, nz, planxb, planyb, planzb, id, nproc)
    deallocate (spec_ux)
    deallocate (spec_uy)
    deallocate (spec_uz)
+   endtime_part = MPI_WTIME()
    if (id == 0) then
-      write (192, *) 'velocity calculation done'
+      print *, 'velocity calculation time =', endtime_part - starttime_part
+      print *, 'vorticity + velocity time =', end_time_total - start_time_total + endtime_part - starttime_part
+      write (192, *) 'velocity calculation time =', endtime_part - starttime_part
+      write (192, *) 'vorticity + velocity time =', end_time_total - start_time_total + endtime_part - starttime_part
    end if
    !==vel==
 
@@ -1100,21 +1226,54 @@ program Weav_ver5_8_2
       end if
 
       if (d_out == 1) then
-         call dissipation_field(velx,vely,velz,disp_field, nx, ny, nzp, kx, ky, kz, k2, planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
-         allocate (data_box(nx/r_d, ny/r_d, nzp/r_d, 2))
+         !call dissipation_field(velx,vely,velz,disp_field, nx, ny, nzp, kx, ky, kz, k2, planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
+         call strain_tensor(velx, vely, velz, disp_field, Q_field, R_field, eigenvalues, eigenvectors, &
+                            nx, ny, nzp, kx, ky, kz, k2, planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
+         do ijk_co = 1, 3
+            ew(ijk_co,:,:,:) = abs(vorx(:,:,:)*eigenvectors(1,ijk_co,:,:,:) + vory(:,:,:)*eigenvectors(2,ijk_co,:,:,:) + vorz(:,:,:)*eigenvectors(3,ijk_co,:,:,:))/(sqrt(vorx(:,:,:)**2+vory(:,:,:)**2+vorz(:,:,:)**2)+1.0d-15)
+         end do
+         beta(:, :, :) = sqrt(6.0d0)*eigenvalues(2,:, :, :)/(sqrt(eigenvalues(1,:, :, :)**2.0d0 + eigenvalues(2,:, :, :)**2.0d0 + eigenvalues(3,:, :, :)**2.0d0)+1.0d-15)
+
+         ! mind the sequence lambda1>lambda2>lambda3 in theory, but lambda1<lambda2<lambda3 in subroutine
+         open (3211, file='./output/stat/pdf_we1.dat', status='unknown')
+         open (3212, file='./output/stat/pdf_we2.dat', status='unknown')
+         open (3213, file='./output/stat/pdf_we3.dat', status='unknown')
+         open (3214, file='./output/stat/pdf_beta.dat', status='unknown')
+         call export_pdf(0, real(ew(3, :, :, :), kind=4), nx, ny, nzp, id, nproc, bin_num, 3211)
+         call export_pdf(0, real(ew(2, :, :, :), kind=4), nx, ny, nzp, id, nproc, bin_num, 3212)
+         call export_pdf(0, real(ew(1, :, :, :), kind=4), nx, ny, nzp, id, nproc, bin_num, 3213)
+         call export_pdf(0, real(beta(:, :, :), kind=4), nx, ny, nzp, id, nproc, bin_num, 3214)
+         close (3211)
+         close (3212)
+         close (3213)
+         close (3214)
+
+         allocate (data_box(nx/r_d, ny/r_d, nzp/r_d, 8))
          do k = 1, nzp/r_d
             do j = 1, ny/r_d
                do i = 1, nx/r_d
                   data_box(i, j, k, 1) = sqrt(vorx(i*r_d, j*r_d, k*r_d)*vorx(i*r_d, j*r_d, k*r_d) + vory(i*r_d, j*r_d, k*r_d)*vory(i*r_d, j*r_d, k*r_d) + vorz(i*r_d, j*r_d, k*r_d)*vorz(i*r_d, j*r_d, k*r_d))
                   data_box(i, j, k, 2) = disp_field(i*r_d, j*r_d, k*r_d)
+                  data_box(i, j, k, 3) = Q_field(i*r_d, j*r_d, k*r_d)
+                  data_box(i, j, k, 4) = R_field(i*r_d, j*r_d, k*r_d)
+                  data_box(i, j, k, 5) = ew(3, i*r_d, j*r_d, k*r_d)
+                  data_box(i, j, k, 6) = ew(2, i*r_d, j*r_d, k*r_d)
+                  data_box(i, j, k, 7) = ew(1, i*r_d, j*r_d, k*r_d)
+                  data_box(i, j, k, 8) = beta(i*r_d, j*r_d, k*r_d)
                end do
             end do
          end do
-         name = './output/field_wd.dat'
-         allocate (varname(2))
+         name = './output/field_ws.dat'
+         allocate (varname(8))
          varname(1) = 'w'
          varname(2) = 'd'
-         call output_v(name, varname, nx/r_d, ny/r_d, nzp/r_d, data_box, 2, id, nproc)
+         varname(3) = 'Q'
+         varname(4) = 'R'
+         varname(5) = 'we1'
+         varname(6) = 'we2'
+         varname(7) = 'we3'
+         varname(8) = 'beta'
+         call output_v(name, varname, nx/r_d, ny/r_d, nzp/r_d, data_box, 8, id, nproc)
          deallocate (data_box)
          deallocate (varname)
       end if
@@ -1165,26 +1324,57 @@ program Weav_ver5_8_2
 
    if (if_pdf == 1) then
       open (3201, file='./output/stat/pdf_um.dat', status='unknown')
+      open (3205, file='./output/stat/pdf_ux.dat', status='unknown')
+      open (3206, file='./output/stat/pdf_uy.dat', status='unknown')
+      open (3207, file='./output/stat/pdf_uz.dat', status='unknown')
       open (3204, file='./output/stat/pdf_wm.dat', status='unknown')
       allocate (tmp_real4(nx, ny, 3*nzp))
       tmp_real4(:, :, 1:nzp) = velx
       tmp_real4(:, :, nzp + 1:2*nzp) = vely
       tmp_real4(:, :, 2*nzp + 1:3*nzp) = velz
       call export_pdf(0, tmp_real4, nx, ny, 3*nzp, id, nproc, bin_num, 3201)
+      call export_pdf(0, real(velx, kind=4), nx, ny, nzp, id, nproc, bin_num, 3205)
+      call export_pdf(0, real(vely, kind=4), nx, ny, nzp, id, nproc, bin_num, 3206)
+      call export_pdf(0, real(velz, kind=4), nx, ny, nzp, id, nproc, bin_num, 3207)
       tmp_real4(:, :, 1:nzp) = vorx
       tmp_real4(:, :, nzp + 1:2*nzp) = vory
       tmp_real4(:, :, 2*nzp + 1:3*nzp) = vorz
       call export_pdf(0, tmp_real4, nx, ny, 3*nzp, id, nproc, bin_num, 3204)
       deallocate (tmp_real4)
       close (3201)
-      close (3202)
-      close (3203)
-      close (3204)
       close (3205)
       close (3206)
+      close (3207)
+      close (3204)
    end if
    if (if_Sp == 1) then
+
+      if (id == 0) then
+         open (20, file='./output/stat/structureFunc_x.dat ', status='unknown')
+      end if
+      do norder = 1, Sp_order
+         call getStructureFunc_x(Sn(norder, :), rr, norder, velx, nx, ny, nz, nzp, id, lg2L)
+         if (id == 0) then
+            print *, 'Sp_order:', norder
+         end if
+      end do
+      if (id == 0) then
+         do i = 0, 2*lg2L
+            write (20, "(ES16.5)", ADVANCE='NO') rr(i)
+            do j = 1, Sp_order
+               write (20, "(ES16.5)", ADVANCE='NO') Sn(j, i)
+            end do
+            write (20, *)
+         end do
+      end if
+      if (id == 0) then
+         close (20)
+      end if
+
       call Sp_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
+      call Sp_T_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
+      call Sp_z_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
+
    end if
    endtime = MPI_WTIME()
    if (id == 0) then
@@ -1224,7 +1414,7 @@ program Weav_ver5_8_2
    deallocate (ky)
    deallocate (kz)
    deallocate (Sn)
-   deallocate (r)
+   deallocate (rr)
    deallocate (meshx_plus)
    deallocate (meshy_plus)
    deallocate (meshz_plus)
@@ -1234,6 +1424,8 @@ program Weav_ver5_8_2
    deallocate (velx)
    deallocate (vely)
    deallocate (velz)
+   deallocate (disp_field, Q_field, R_field)
+   deallocate (eigenvalues, eigenvectors, ew, beta)
    !deallocate (phiv)
    call MPI_Finalize(ierr)
    !read (*, *)

@@ -70,6 +70,112 @@ subroutine Sp_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
    integer, dimension(nproc) :: counts, displs
    real*8, dimension(nx, ny, nzp) :: velx, vely, velz
    real*8, allocatable :: ux(:, :, :), uy(:, :, :), uz(:, :, :)
+   real*8, allocatable :: Sp(:, :), Sp_x(:, :), Sp_y(:, :), Sp_z(:, :)
+   real*8 Sp_plus, dux, duy, duz
+   pi = 4.0d0*datan(1.0d0)
+   pi2 = 8.0d0*datan(1.0d0)
+   dr = pi2/nx
+   lg2L = floor(log(real(nx))/log(2.0) + 0.01)
+   nz = nzp*nproc
+   if (id == 0) then
+      allocate (ux(nx, ny, nz))
+      allocate (uy(nx, ny, nz))
+      allocate (uz(nx, ny, nz))
+      allocate (Sp(Sp_order, 0:2*lg2L))
+      allocate (Sp_x(Sp_order, 0:2*lg2L))
+      allocate (Sp_y(Sp_order, 0:2*lg2L))
+      allocate (Sp_z(Sp_order, 0:2*lg2L))
+      Sp = 0
+      Sp_x = 0
+      Sp_y = 0
+      Sp_z = 0
+   end if
+   do i = 1, nproc
+      counts(i) = nx*ny*nzp
+      displs(i) = (i - 1)*counts(i)
+   end do
+   call mpi_gatherv(velx, counts(id + 1), MPI_DOUBLE, ux, counts, displs, MPI_DOUBLE, 0, mpi_comm_world, ierr)
+   call mpi_gatherv(vely, counts(id + 1), MPI_DOUBLE, uy, counts, displs, MPI_DOUBLE, 0, mpi_comm_world, ierr)
+   call mpi_gatherv(velz, counts(id + 1), MPI_DOUBLE, uz, counts, displs, MPI_DOUBLE, 0, mpi_comm_world, ierr)
+   if (id == 0) then
+      do p = 1, Sp_order
+
+         do lg2r = 0, 2*lg2L
+            r = floor(sqrt(2.0)**lg2r + 0.5)
+            do k = 1, nz
+               do j = 1, ny
+                  do i = 1, nx
+
+                     dux = ux(mod(i + r - 1, nx) + 1, j, k) - ux(i, j, k)
+                     duy = uy(i, mod(j + r - 1, ny) + 1, k) - uy(i, j, k)
+                     duz = uz(i, j, mod(k + r - 1, nz) + 1) - uz(i, j, k)
+                     Sp_plus = dux**p + duy**p + duz**p
+                     Sp_plus = Sp_plus/nx/ny/nz/3.0d0
+                     Sp(p, lg2r) = Sp(p, lg2r) + Sp_plus
+                     Sp_x(p, lg2r) = Sp_x(p, lg2r) + dux**p/nx/ny/nz/1.0d0
+                     Sp_y(p, lg2r) = Sp_y(p, lg2r) + duy**p/nx/ny/nz/1.0d0
+                     Sp_z(p, lg2r) = Sp_z(p, lg2r) + duz**p/nx/ny/nz/1.0d0
+                  end do
+               end do
+            end do
+         end do
+      end do
+      open (3301, file='./output/stat/Sp.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+      open (3301, file='./output/stat/Sp_x.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp_x(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+      open (3301, file='./output/stat/Sp_y.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp_y(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+      open (3301, file='./output/stat/Sp_z.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp_z(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+   end if
+   if (id == 0) then
+      deallocate (ux, uy, uz)
+      deallocate (Sp, Sp_x, Sp_y, Sp_z)
+   end if
+end subroutine Sp_calculate
+
+subroutine Sp_T_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
+   implicit none
+   include 'mpif.h'
+   real*8 dr, pi, pi2
+   integer nx, ny, nzp, nz, id, nproc, ierr, i, j, k
+   integer lg2r, lg2L, Sp_order, p, r
+   integer, dimension(nproc) :: counts, displs
+   real*8, dimension(nx, ny, nzp) :: velx, vely, velz
+   real*8, allocatable :: ux(:, :, :), uy(:, :, :), uz(:, :, :)
    real*8, allocatable :: Sp(:, :)
    real*8 Sp_plus, dux, duy, duz
    pi = 4.0d0*datan(1.0d0)
@@ -100,9 +206,9 @@ subroutine Sp_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
                do j = 1, ny
                   do i = 1, nx
 
-                     dux = ux(mod(i + r - 1, nx) + 1, j, k) - ux(i, j, k)
-                     duy = uy(i, mod(j + r - 1, ny) + 1, k) - uy(i, j, k)
-                     duz = uz(i, j, mod(k + r - 1, nz) + 1) - uz(i, j, k)
+                     duy = uy(mod(i + r - 1, nx) + 1, j, k) - uy(i, j, k)
+                     duz = uz(i, mod(j + r - 1, ny) + 1, k) - uz(i, j, k)
+                     dux = ux(i, j, mod(k + r - 1, nz) + 1) - ux(i, j, k)
                      Sp_plus = dux**p + duy**p + duz**p
                      Sp_plus = Sp_plus/nx/ny/nz/3.0d0
                      Sp(p, lg2r) = Sp(p, lg2r) + Sp_plus
@@ -111,7 +217,7 @@ subroutine Sp_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
             end do
          end do
       end do
-      open (3301, file='./output/stat/Sp.dat', status='unknown')
+      open (3301, file='./output/stat/SpT.dat', status='unknown')
       do lg2r = 0, 2*lg2L
          r = floor(sqrt(2.0)**lg2r + 0.5)
          write (3301, "(ES16.5)", ADVANCE='NO') r*dr
@@ -126,38 +232,155 @@ subroutine Sp_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
       deallocate (ux, uy, uz)
       deallocate (Sp)
    end if
-end subroutine Sp_calculate
+end subroutine
 
-subroutine getStructureFunc_x(Sn, r, norder, velx, nx, ny, nz, nzp, id)
+subroutine Sp_z_calculate(Sp_order, nx, ny, nzp, velx, vely, velz, id, nproc)
    implicit none
    include 'mpif.h'
    real*8 dr, pi, pi2
-   integer i, j, k, m, p, norder
-   integer nx, ny, nzp, nz, ierr, id
-   real*8, dimension(nx, ny, nzp) :: velx
-   real*8, dimension(nx/2 + 1) :: Sn1, Sn, r
+   integer nx, ny, nzp, nz, id, nproc, ierr, i, j, k
+   integer lg2r, lg2L, Sp_order, p, r
+   integer, dimension(nproc) :: counts, displs
+   real*8, dimension(nx, ny, nzp) :: velx, vely, velz
+   real*8, allocatable :: ux(:, :, :), uy(:, :, :), uz(:, :, :)
+   real*8, allocatable :: Sp(:, :), Sp_z1(:, :), Sp_z2(:, :), Sp_z3(:, :)
+   real*8 Sp_plus, dux, duy, duz
    pi = 4.0d0*datan(1.0d0)
    pi2 = 8.0d0*datan(1.0d0)
    dr = pi2/nx
-   do m = 1, nx/2 + 1
-      r(m) = (m - 1)*dr
+   lg2L = floor(log(real(nx))/log(2.0) + 0.01)
+   nz = nzp*nproc
+   if (id == 0) then
+      allocate (ux(nx, ny, nz))
+      allocate (uy(nx, ny, nz))
+      allocate (uz(nx, ny, nz))
+      allocate (Sp(Sp_order, 0:2*lg2L))
+      allocate (Sp_z1(Sp_order, 0:2*lg2L))
+      allocate (Sp_z2(Sp_order, 0:2*lg2L))
+      allocate (Sp_z3(Sp_order, 0:2*lg2L))
+      Sp = 0
+      Sp_z1 = 0
+      Sp_z2 = 0
+      Sp_z3 = 0
+   end if
+   do i = 1, nproc
+      counts(i) = nx*ny*nzp
+      displs(i) = (i - 1)*counts(i)
    end do
+   call mpi_gatherv(velx, counts(id + 1), MPI_DOUBLE, ux, counts, displs, MPI_DOUBLE, 0, mpi_comm_world, ierr)
+   call mpi_gatherv(vely, counts(id + 1), MPI_DOUBLE, uy, counts, displs, MPI_DOUBLE, 0, mpi_comm_world, ierr)
+   call mpi_gatherv(velz, counts(id + 1), MPI_DOUBLE, uz, counts, displs, MPI_DOUBLE, 0, mpi_comm_world, ierr)
+   if (id == 0) then
+      do p = 1, Sp_order
+
+         do lg2r = 0, 2*lg2L
+            r = floor(sqrt(2.0)**lg2r + 0.5)
+            do k = 1, 1
+               do j = 1, ny
+                  do i = 1, nx
+                     dux = ux(mod(i + r - 1, nx) + 1, j, k) - ux(i, j, k)
+                     duy = uy(i, mod(j + r - 1, ny) + 1, k) - uy(i, j, k)
+                     duz = uz(i, j, mod(k + r - 1, nz) + 1) - uz(i, j, k)
+                     Sp_plus = dux**p + duy**p + duz**p
+                     Sp_plus = Sp_plus/nx/ny/3.0d0
+                     Sp_z1(p, lg2r) = Sp_z1(p, lg2r) + Sp_plus
+                  end do
+               end do
+            end do
+            do k = nz/4, nz/4
+               do j = 1, ny
+                  do i = 1, nx
+                     dux = ux(mod(i + r - 1, nx) + 1, j, k) - ux(i, j, k)
+                     duy = uy(i, mod(j + r - 1, ny) + 1, k) - uy(i, j, k)
+                     duz = uz(i, j, mod(k + r - 1, nz) + 1) - uz(i, j, k)
+                     Sp_plus = dux**p + duy**p + duz**p
+                     Sp_plus = Sp_plus/nx/ny/3.0d0
+                     Sp_z2(p, lg2r) = Sp_z2(p, lg2r) + Sp_plus
+                  end do
+               end do
+            end do
+            do k = nz/2, nz/2
+               do j = 1, ny
+                  do i = 1, nx
+                     dux = ux(mod(i + r - 1, nx) + 1, j, k) - ux(i, j, k)
+                     duy = uy(i, mod(j + r - 1, ny) + 1, k) - uy(i, j, k)
+                     duz = uz(i, j, mod(k + r - 1, nz) + 1) - uz(i, j, k)
+                     Sp_plus = dux**p + duy**p + duz**p
+                     Sp_plus = Sp_plus/nx/ny/3.0d0
+                     Sp_z3(p, lg2r) = Sp_z3(p, lg2r) + Sp_plus
+                  end do
+               end do
+            end do
+         end do
+      end do
+      open (3301, file='./output/stat/Sp_z1.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp_z1(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+      open (3301, file='./output/stat/Sp_z2.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp_z2(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+      open (3301, file='./output/stat/Sp_z3.dat', status='unknown')
+      do lg2r = 0, 2*lg2L
+         r = floor(sqrt(2.0)**lg2r + 0.5)
+         write (3301, "(ES16.5)", ADVANCE='NO') r*dr
+         do p = 1, Sp_order
+            write (3301, "(ES16.5)", ADVANCE='NO') Sp_z3(p, lg2r)
+         end do
+         write (3301, *)
+      end do
+      close (3301)
+   end if
+   if (id == 0) then
+      deallocate (ux, uy, uz)
+      deallocate (Sp, Sp_z1, Sp_z2, Sp_z3)
+   end if
+end subroutine
+
+subroutine getStructureFunc_x(Sn, rr, norder, velx, nx, ny, nz, nzp, id, lg2L)
+   implicit none
+   include 'mpif.h'
+   real*8 dr, pi, pi2
+   integer dn, lg2r, lg2L, r
+   integer i, j, k, m, p, norder
+   integer nx, ny, nzp, nz, ierr, id
+   real*8, dimension(nx, ny, nzp) :: velx
+   real*8, dimension(0:2*lg2L) :: Sn1, Sn, rr
+   pi = 4.0d0*datan(1.0d0)
+   pi2 = 8.0d0*datan(1.0d0)
+   dr = pi2/nx
+   dn = max(nx/512, 1)
    Sn1 = 0.0d0
-   do k = 1, nzp
-      do j = 1, ny
-         do i = 1, nx
-            do m = 1, nx/2 + 1
-               p = i + (m - 1)
-               if (p > nx) p = p - nx
-               Sn1(m) = Sn1(m) + (velx(p, j, k) - velx(i, j, k))**norder
+
+   do lg2r = 0, 2*lg2L
+      r = floor(sqrt(2.0)**lg2r + 0.5)
+      rr(lg2r) = r*dr
+      do k = 1, nzp, dn
+         do j = 1, ny, dn
+            do i = 1, nx, dn
+               Sn1(lg2r) = Sn1(lg2r) + (velx(mod(i + r - 1, nx) + 1, j, k) - velx(i, j, k))**norder
             end do
          end do
       end do
    end do
 
-   call MPI_REDUCE(Sn1, Sn, nx/2 + 1, MPI_DOUBLE_PRECISION, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
-
-   Sn = Sn/(nx*ny*nz)
+   call MPI_REDUCE(Sn1, Sn, 2*lg2L + 1, MPI_DOUBLE_PRECISION, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
+   if (id == 0) then
+      Sn = Sn/(nx*ny*nz)*dn**3
+   end if
 
 end subroutine
 
@@ -352,21 +575,21 @@ subroutine curve_spline_pl_v2(a_list, b_list, c_list, d_list, n_sec, cx_pl, cy_p
 
 end subroutine
 
-subroutine coo_curve_ip(zeta0, c3, a, b, c, d)
-   real*8 zeta, zeta0, pi, pi2
+subroutine coo_curve_givenfunction(zeta, c3)
+   real*8 zeta, pi, pi2
    real*8, dimension(3) :: c3
-   integer ii, i, i_co
-   real*8, dimension(3) :: a, b, c, d
+   integer ii, i, j, i_co
+   !real*8, dimension(0:5, 3) :: coe_3
+   real*8 T, R
    pi = 4.0d0*datan(1.0d0)
    pi2 = 8.0d0*datan(1.0d0)
-   ! think again
-   zeta = zeta0 !bug
-   ! zeta = dmod(zeta0, pi2)
-   ! if (zeta < 0.0d0) zeta = zeta + pi2
 
-   do i_co = 1, 3
-      c3(i_co) = a(i_co)*zeta**3.0d0 + b(i_co)*zeta**2.0d0 + c(i_co)*zeta + d(i_co)
-   end do
+   T = 2.0d0
+   R = pi/2.0d0
+
+   c3(1) = R*dcos(T*zeta)
+   c3(2) = R*dsin(T*zeta)
+   c3(3) = zeta - pi
 
    !mind
    if (c3(1) >= pi) c3(1) = c3(1) - pi2
@@ -378,64 +601,33 @@ subroutine coo_curve_ip(zeta0, c3, a, b, c, d)
 
 end subroutine
 
-subroutine d1_coo_curve_ip(zeta, dc3, dzeta, coe_3)
+subroutine d1_coo_curve_givenfunction(zeta, dc3, dzeta)
    real*8 zeta, dzeta, pi, pi2
    real*8, dimension(3) :: dc3, c3r, c3l
    real*8, dimension(3) :: c3
    integer npoint, i, j, i_co
-   real*8, dimension(0:5, 3) :: coe_3
+   !real*8, dimension(0:5, 3) :: coe_3
 
-   call coo_curve_spline_5th(zeta + dzeta, c3r, coe_3)
-   call coo_curve_spline_5th(zeta - dzeta, c3l, coe_3)
+   call coo_curve_givenfunction(zeta + dzeta, c3r)
+   call coo_curve_givenfunction(zeta - dzeta, c3l)
    call cminus(c3r, c3l, dc3)
    dc3 = dc3/2.d0/dzeta
 end subroutine
 
-subroutine d2_coo_curve_ip(zeta, dc3, dzeta, coe_3)
+subroutine d2_coo_curve_givenfunction(zeta, dc3, dzeta)
    real*8 zeta, dzeta, pi, pi2
    real*8, dimension(3) :: dc3, c3r, c3l
    real*8, dimension(3) :: c3
    integer npoint, i, j, i_co
-   real*8, dimension(0:5, 3) :: coe_3
+   !real*8, dimension(0:5, 3) :: coe_3
 
-   call d1_coo_curve_ip(zeta + dzeta, c3r, dzeta, coe_3)
-   call d1_coo_curve_ip(zeta - dzeta, c3l, dzeta, coe_3)
+   call d1_coo_curve_givenfunction(zeta + dzeta, c3r, dzeta)
+   call d1_coo_curve_givenfunction(zeta - dzeta, c3l, dzeta)
 
    call cminus(c3r, c3l, dc3)
    dc3 = dc3/2.d0/dzeta
 end subroutine
 
-subroutine d1_coo_curve_ip_func(zeta, dc3, a, b, c, d)
-   real*8 zeta, dzeta, pi, pi2
-   real*8, dimension(3) :: dc3, c3r, c3l
-   real*8, dimension(3) :: c3
-   integer npoint, i, i_co
-   real*8, dimension(3) :: a, b, c, d
-   !think again
-   !suppose that zeta +- dzeta belongs to i_p_c, if not, there are minor errors
-   !consider the continuity
-
-   do i_co = 1, 3
-      dc3(i_co) = 3.0d0*a(i_co)*zeta**2.0d0 + 2.0d0*b(i_co)*zeta + c(i_co)
-   end do
-
-end subroutine
-
-subroutine d2_coo_curve_ip_func(zeta, dc3, a, b, c, d)
-   real*8 zeta, dzeta, pi, pi2
-   real*8, dimension(3) :: dc3, c3r, c3l
-   real*8, dimension(3) :: c3
-   integer npoint, i, i_co
-   real*8, dimension(3) :: a, b, c, d
-   !think again
-   !suppose that zeta +- dzeta belongs to i_p_c, if not, there are minor errors
-   !consider the continuity
-
-   do i_co = 1, 3
-      dc3(i_co) = 6.0d0*a(i_co)*zeta + 2.0d0*b(i_co)
-   end do
-
-end subroutine
 
 subroutine get_spline_5th_coe(coe, zeta_r, x_l, x_r, v_l, v_r, a_l, a_r)
    real*8 pi, pi2
@@ -1124,6 +1316,141 @@ call dx_dy_dz_dp_dm(velz, dudx(3,j,:,:,:), j, nx, ny, nzp, kx, ky, kz, k2, planx
    end do
 
 end subroutine dissipation_field
+
+!-----------------------------------------------------------------------
+! Subroutine: strain_tensor
+! Purpose:    Calculate the strain tensor, dissipation field, eigenvalues,
+!             and orthogonal eigenvectors (orthonormal basis) of the strain tensor
+!
+! Inputs:
+!   velx, vely, velz   - Velocity components in x, y, z directions (3D arrays)
+!   nx, ny, nzp        - Grid dimensions (nzp: local z-dimension for current process)
+!   kx, ky, kz         - Wavenumbers in x, y, z directions
+!   k2                 - Squared wavenumber (kx² + ky² + kz²)
+!   planxf, planyf, planzf - Forward FFT plans (for derivative calculations)
+!   planxb, planyb, planzb - Backward FFT plans (for derivative calculations)
+!   id                 - Current process ID (for parallel computation)
+!   nproc              - Total number of processes
+!
+! Outputs:
+!   disp_field         - Dissipation field (sum of squared strain tensor components)
+!   eigenvalues        - Eigenvalues of the strain tensor (3 per grid point)
+!   eigenvectors       - Orthogonal eigenvectors of the strain tensor (3x3 per grid point)
+!-----------------------------------------------------------------------
+subroutine strain_tensor(velx, vely, velz, disp_field, Q_field, R_field, eigenvalues, eigenvectors, &
+    nx, ny, nzp, kx, ky, kz, k2, planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
+    implicit none
+    ! Input parameters
+    integer*8 :: planxf, planyf, planzf, planxb, planyb, planzb
+    integer :: nx, ny, nzp, id, nproc
+    real*8, dimension(nx) :: kx
+    real*8, dimension(ny) :: ky
+    real*8, dimension(nzp) :: kz
+    real*8, dimension(nx, ny, nzp) :: k2
+    real*8, dimension(nx, ny, nzp) :: velx, vely, velz
+
+    ! Output parameters
+    real*8, dimension(nx, ny, nzp) :: disp_field, Q_field, R_field         ! Dissipation field
+    real*8, dimension(3, nx, ny, nzp) :: eigenvalues         ! Eigenvalues of strain tensor
+    real*8, dimension(3, 3, nx, ny, nzp) :: eigenvectors     ! Orthonormal eigenvectors (columns)
+
+    ! Local variables
+    integer :: nz, i, j, ii, jj, kk, lwork, info
+    real*8, dimension(3, 3, nx, ny, nzp) :: dudx, sij, omega_ij        ! Velocity gradient (dudx) and strain tensor (sij)
+    real*8, dimension(3, 3) :: work_mat                      ! Temporary matrix for current grid point
+    real*8, dimension(3) :: evals                            ! Temporary storage for eigenvalues
+    real*8, dimension(100) :: work                           ! Work array for LAPACK routine
+    real*8 :: det
+
+    nz = nzp * nproc  ! Total z-dimension across all processes
+
+    ! Step 1: Calculate velocity gradient tensor dudx(i,j) = ∂u_i/∂x_j
+    do j = 1, 3
+        ! Compute gradients for x-component of velocity
+        call dx_dy_dz_dp_dm(velx, dudx(1,j,:,:,:), j, nx, ny, nzp, kx, ky, kz, k2, &
+            planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
+        ! Compute gradients for y-component of velocity
+        call dx_dy_dz_dp_dm(vely, dudx(2,j,:,:,:), j, nx, ny, nzp, kx, ky, kz, k2, &
+            planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
+        ! Compute gradients for z-component of velocity
+        call dx_dy_dz_dp_dm(velz, dudx(3,j,:,:,:), j, nx, ny, nzp, kx, ky, kz, k2, &
+            planxf, planyf, planzf, planxb, planyb, planzb, id, nproc)
+    end do
+
+    ! Step 2: Calculate strain tensor (symmetric part of velocity gradient)
+    ! sij = 0.5*(∂u_i/∂x_j + ∂u_j/∂x_i)
+    do i = 1, 3
+        do j = 1, 3
+            sij(i, j, :, :, :) = (dudx(i, j, :, :, :) + dudx(j, i, :, :, :)) / 2.0d0
+            omega_ij(i, j, :, :, :) = (dudx(i, j, :, :, :) - dudx(j, i, :, :, :)) / 2.0d0
+        end do
+    end do
+
+    ! Step 3: Calculate dissipation field (sum of squared strain components)
+    disp_field = 0.0d0
+    do kk = 1, nzp
+        do jj = 1, ny
+            do ii = 1, nx
+                do i = 1, 3
+                    do j = 1, 3
+                        disp_field(ii, jj, kk) = disp_field(ii, jj, kk) + sij(i,j,ii,jj,kk)**2
+                        Q_field(ii, jj, kk) = Q_field(ii, jj, kk) + (omega_ij(i,j,ii,jj,kk)**2-sij(i,j,ii,jj,kk)**2) / 2.0d0
+                    end do
+                end do
+            end do
+        end do
+    end do
+
+    do kk = 1, nzp
+        do jj = 1, ny
+            do ii = 1, nx
+               work_mat(1:3, 1:3) = dudx(1:3, 1:3, ii, jj, kk)
+               det = work_mat(1,1)*work_mat(2,2)*work_mat(3,3) &
+                     + work_mat(1,2)*work_mat(2,3)*work_mat(3,1) &
+                     + work_mat(1,3)*work_mat(2,1)*work_mat(3,2) &
+                     - work_mat(1,3)*work_mat(2,2)*work_mat(3,1) &
+                     - work_mat(1,1)*work_mat(2,3)*work_mat(3,2) &
+                     - work_mat(1,2)*work_mat(2,1)*work_mat(3,3)
+               R_field(ii, jj, kk) = - det
+            end do
+        end do
+    end do
+
+    ! Step 4: Compute eigenvalues and orthonormal eigenvectors of strain tensor
+    ! Using LAPACK's dsyev for symmetric matrix diagonalization
+    lwork = 100  ! Work array size (sufficient for 3x3 matrices)
+    do kk = 1, nzp
+        do jj = 1, ny
+            do ii = 1, nx
+                ! Extract strain tensor for current grid point (ii,jj,kk)
+                work_mat(1:3, 1:3) = sij(1:3, 1:3, ii, jj, kk)
+
+                ! Call LAPACK routine dsyev:
+                ! 'V' = compute both eigenvalues and eigenvectors
+                ! 'U' = upper triangle of matrix is used (since symmetric)
+                ! 3 = matrix dimension
+                ! work_mat = input (strain tensor), output (eigenvectors in columns)
+                ! 3 = leading dimension of work_mat
+                ! evals = output eigenvalues (sorted in ascending order)
+                ! work = work array
+                ! lwork = size of work array
+                ! info = exit status (0 = success)
+                call dsyev('V', 'U', 3, work_mat, 3, evals, work, lwork, info)
+
+                ! Check for successful diagonalization
+                if (info /= 0) then
+                    print *, 'Error in dsyev at grid (ii,jj,kk)=', ii, jj, kk, ' info=', info
+                    stop  ! Terminate execution or handle error as needed
+                end if
+
+                ! Store results: eigenvalues and orthonormal eigenvectors
+                eigenvalues(1:3, ii, jj, kk) = evals(1:3)
+                eigenvectors(1:3, 1:3, ii, jj, kk) = work_mat(1:3, 1:3)
+            end do
+        end do
+    end do
+
+end subroutine strain_tensor
 
 subroutine dx_dy_dz_dp_dm(phy, dphy, switch_d, nx, ny, nzp, kx, ky, kz, k2, planxf, planyf, planzf,&
     &planxb, planyb, planzb, id, nproc)
