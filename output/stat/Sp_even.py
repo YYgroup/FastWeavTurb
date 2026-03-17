@@ -140,8 +140,7 @@ font = FontProperties(family='Times New Roman', size=44)
 legend = ax.legend(new_handles, new_labels, prop=font, loc='lower center', bbox_to_anchor=(0.74, -0.04), frameon=False, markerscale=1,
                    handletextpad=0.25,  # 调整图例标记和文本之间的间距
                    labelspacing=-0.05)  # 调整图例项之间的垂直间距
-# 添加文本注释
-ax.text(0.1, 0.8, r'$r_L=4$', transform=ax.transAxes, fontsize=46, fontfamily='Times New Roman',color='black')
+
 
 # 显示图形
 plt.tight_layout()
